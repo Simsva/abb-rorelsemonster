@@ -9,13 +9,17 @@ class UIObject {
     this.h = h;
     this._id = obj_next_id++;
     this._alive = true;
-    if(global) ui_objs.push(this);
+    this._subobjs = [];
+    this._global = global;
+    if(this._global) ui_objs.push(this);
   }
 
   destroy() {
-    const i = ui_objs.map(o => o._id).indexOf(this._id);
-    if(i !== -1) ui_objs.splice(i, 1);
     this._alive = false;
+    if(this._global) {
+      const i = ui_objs.map(o => o._id).indexOf(this._id);
+      if(i !== -1) ui_objs.splice(i, 1);
+    }
   }
 
   is_inside(x, y) {
@@ -45,61 +49,92 @@ class Library extends UIObject {
   }
 }
 
+class _TextObject extends UIObject {
+  constructor(x, y, w, h, text, font, style) {
+    super(x, y, w, h, false);
+
+    this.text = text;
+    this.font = font;
+    this.style = style;
+  }
+
+  render(ctx, cw, ch) {
+    ctx.font = this.font;
+    ctx.fillStyle = this.style;
+
+    ctx.fillText(this.text, this.x, this.y+this.h);
+  }
+}
+
 class TextBox extends UIObject {
-  constructor(x, y, text_objs, border_style, offset, permanent=false) {
+  constructor(x, y, text_objs, border_style, margin, permanent=true) {
     super(x, y, 0, 0);
 
     this.tos = text_objs;
     this.bstyle = border_style;
-    this.off = offset;
+    this.margin = margin;
     this.permanent = permanent;
   }
 
   logic(ctx, cw, ch) {
+    /* FIXME: REALLY inefficient */
+    this._subobjs.forEach(o => o.destroy());
+    this._subobjs = [];
     this.lh = [0]; this.lw = [0];
-    let line = 0;
+    let line = 0, margin = 0;
 
+    /* calculate all offsets */
     this.tms = this.tos.map(t => {
-      if(t === "\n") {
-        line++;
-        this.lw[line] = 0;
-        this.lh[line] = 0;
-      }
-      ctx.font = t.font;
-      let tm = ctx.measureText(t.text);
-      let th = text_height(tm);
+      switch(t.type) {
+        case "lf":
+          this.lh[line++] += margin;
+          margin = t.margin;
+          this.lw[line] = 0;
+          this.lh[line] = 0;
+          return null;
 
-      this.lw[line] += tm.width;
-      this.lh[line] = Math.max(this.lh[line], th);
-      return { w: tm.width, h: th, l: line, };
+        case "text":
+          ctx.font = t.font;
+          let tm = ctx.measureText(t.text);
+          let th = text_height(tm);
+
+          this.lw[line] += tm.width;
+          this.lh[line] = Math.max(this.lh[line], th);
+          return { w: tm.width, h: th, l: line, };
+      }
     });
 
-    this.w = Math.max(...this.lw) + 2*this.off;
-    this.h = this.lh.reduce((a, b) => a+b) + (2+line)*this.off;
+    this.w = Math.max(...this.lw) + 2*this.margin;
+    this.h = this.lh.reduce((a, b) => a+b) + 2*this.margin;
+
+    /* create all subobjects */
+    let cur_w = 0, cur_h = this.lh[0];
+    line = 0;
+    for(let i = 0; i < this.tos.length; i++) {
+      const t = this.tos[i], tm = this.tms[i];
+      switch(t.type) {
+        case "lf":
+          cur_w = 0;
+          cur_h += this.lh[++line];
+          continue;
+
+        case "text":
+          let so_i = this._subobjs.push(new _TextObject(
+            this.x+this.margin + cur_w,
+            this.y+this.margin + cur_h-tm.h,
+            tm.w, tm.h,
+            t.text, t.font, t.style,
+          )) - 1;
+          if(t.click) this._subobjs[so_i].click = t.click;
+          if(t.hover) this._subobjs[so_i].hover = t.hover;
+          cur_w += tm.w;
+          break;
+      }
+    }
   }
 
   render(ctx, cw, ch) {
-    let cur_w = 0, cur_h = this.lh[0], line = 0;
-
-    for(let i = 0; i < this.tos.length; i++) {
-      const t = this.tos[i], tm = this.tms[i];
-      if(t === "\n") {
-        cur_w = 0;
-        cur_h += this.lh[++line];
-        continue;
-      };
-
-      ctx.font = t.font;
-      ctx.fillStyle = t.style;
-
-      ctx.fillText(t.text, this.x+this.off + cur_w, this.y+(line+1)*this.off + cur_h);
-      cur_w += tm.w;
-    }
-
-    ctx.strokeStyle = this.bstyle;
-    ctx.beginPath();
-    ctx.rect(this.x, this.y, this.w, this.h);
-    ctx.stroke();
+    /* All rendering is done in subobjects */
   }
 
   click(opts) {
@@ -134,7 +169,6 @@ class Timers extends UIObject {
   }
 
   render(ctx, cw, ch) {
-    /* FIXME: calculations break on descenders */
     let fps_h = text_height(this.fps_m) + this.off,
         ups_h = text_height(this.ups_m) + this.off,
         fps_x = cw - this.fps_m.width - this.off,
@@ -167,22 +201,35 @@ class Timers extends UIObject {
   }
 }
 
+/* globals */
+let m_x = 0, m_y = 0;
+let render_bboxes = true;
+let mspt = 0, mspu = 0;
+
+let libs = [];
+let c_x, c_y, r;
+
 /* utils */
 let text_height = (tm) => tm.actualBoundingBoxAscent; //+ tm.actualBoundingBoxDescent;
 
 let Text = {
   t(text, font, style) {
-    return { text: text, font: font, style: style };
+    return { type: "text", text: text, font: font, style: style, };
+  },
+  c(text, font, style, click) {
+    return { type: "text", text: text, font: font, style: style, click: click, };
+  },
+  lf(margin=0) {
+    return { type: "lf", margin: margin, };
   },
 };
 
-/* globals */
-let m_x = 0, m_y = 0;
-let render_bboxes = false;
-let mspt = 0, mspu = 0;
-
-let libs = [];
-let c_x, c_y, r;
+let render_bbox = (obj, ctx, style) => {
+  ctx.strokeStyle = style;
+  ctx.beginPath();
+  ctx.rect(obj.x, obj.y, obj.w, obj.h);
+  ctx.stroke();
+};
 
 /* events */
 let mouse_move = (e) => {
@@ -200,10 +247,12 @@ let mouse_down = (e) => {
     buttons: e.buttons,
   };
 
-  for(let obj of ui_objs) {
-    if(obj.is_inside(e.offsetX, e.offsetY))
-      obj.click(opts);
-  }
+  ui_objs.filter(o => o.is_inside(e.offsetX, e.offsetY)).forEach(o => {
+    o.click(opts);
+    o._subobjs
+     .filter(so => so.is_inside(e.offsetX, e.offsetY))
+     .forEach(so => so.click(opts));
+  });
 }
 
 /* functions */
@@ -247,12 +296,14 @@ let render_begin = (ctx, canvas) => {
   new TextBox(50, 50, [
     Text.t("Hello world ", "30px sans", "green"),
     Text.t("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "30px sans", "red"),
-    "\n",
-    Text.t("hejehe", "20px serif", "blue"),
-    "\n",
+    Text.lf(15),
+    Text.c("hejehe", "20px serif", "blue", (opts) => {
+      console.log(opts);
+    }),
+    Text.lf(),
     Text.t("bruh", "50px mono", "black"),
     Text.t("This is a text box.", "30px sans", "orange"),
-  ], "transparent", 10, false);
+  ], "transparent", 0);
 }
 
 let last_render = 0;
@@ -270,15 +321,15 @@ let render_loop = (ctx, canvas) => {
   ctx.stroke();
 
   /* render objects */
-  for(let obj of ui_objs) {
-    obj.render(ctx, canvas.width, canvas.height);
+  /* TODO: render deeper subobjects */
+  ui_objs.forEach(o => {
+    o.render(ctx, canvas.width, canvas.height);
+    o._subobjs.forEach(so => so.render(ctx, canvas.width, canvas.height));
     if(render_bboxes) {
-      ctx.strokeStyle = "red";
-      ctx.beginPath();
-      ctx.rect(obj.x, obj.y, obj.w, obj.h);
-      ctx.stroke();
+      render_bbox(o, ctx, "red");
+      o._subobjs.forEach(so => render_bbox(so, ctx, "green"));
     }
-  }
+  });
 }
 
 let last_logic = 0;
@@ -287,7 +338,10 @@ let logic_loop = (ctx, canvas) => {
   mspu = now - last_logic;
   last_logic = now;
 
-  for(let obj of ui_objs) obj.logic(ctx, canvas.width, canvas.height);
+  ui_objs.forEach(o => {
+    o.logic(ctx, canvas.width, canvas.height);
+    o._subobjs.forEach(so => so.logic(ctx, canvas.width, canvas.height));
+  });
 }
 
 window.addEventListener("DOMContentLoaded", () => {
