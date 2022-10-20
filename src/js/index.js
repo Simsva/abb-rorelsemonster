@@ -67,13 +67,12 @@ class _TextObject extends UIObject {
 }
 
 class TextBox extends UIObject {
-  constructor(x, y, text_objs, border_style, margin, permanent=true) {
+  constructor(x, y, text_objs, border_style, margin) {
     super(x, y, 0, 0);
 
     this.tos = text_objs;
     this.bstyle = border_style;
     this.margin = margin;
-    this.permanent = permanent;
   }
 
   logic(ctx, cw, ch) {
@@ -81,21 +80,23 @@ class TextBox extends UIObject {
     this._subobjs.forEach(o => o.destroy());
     this._subobjs = [];
     this.lh = [0]; this.lw = [0];
-    let line = 0, margin = 0;
+    let line = 0, lfmargin = 0;
 
     /* calculate all offsets */
     this.tms = this.tos.map(t => {
       switch(t.type) {
         case "lf":
-          this.lh[line++] += margin;
-          margin = t.margin;
+          this.lh[line++] += lfmargin;
+          lfmargin = t.margin;
           this.lw[line] = 0;
           this.lh[line] = 0;
           return null;
 
+        case "vartext":
         case "text":
-          ctx.font = t.font;
-          let tm = ctx.measureText(t.text);
+          const T = t.type === "text" ? t : t.get();
+          ctx.font = T.font;
+          let tm = ctx.measureText(T.text);
           let th = text_height(tm);
 
           this.lw[line] += tm.width;
@@ -103,6 +104,8 @@ class TextBox extends UIObject {
           return { w: tm.width, h: th, l: line, };
       }
     });
+    /* add last margign */
+    this.lh[line] += lfmargin;
 
     this.w = Math.max(...this.lw) + 2*this.margin;
     this.h = this.lh.reduce((a, b) => a+b) + 2*this.margin;
@@ -118,96 +121,34 @@ class TextBox extends UIObject {
           cur_h += this.lh[++line];
           continue;
 
+        case "vartext":
         case "text":
+          const T = t.type === "text" ? t : t.get();
           let so_i = this._subobjs.push(new _TextObject(
             this.x+this.margin + cur_w,
             this.y+this.margin + cur_h-tm.h,
             tm.w, tm.h,
-            t.text, t.font, t.style,
+            T.text, T.font, T.style,
           )) - 1;
-          if(t.click) this._subobjs[so_i].click = t.click;
-          if(t.hover) this._subobjs[so_i].hover = t.hover;
+          if(T.click) this._subobjs[so_i].click = T.click;
+          if(T.hover) this._subobjs[so_i].hover = T.hover;
           cur_w += tm.w;
           break;
       }
-    }
-  }
-
-  render(ctx, cw, ch) {
-    /* All rendering is done in subobjects */
-  }
-
-  click(opts) {
-    switch(opts.button) {
-      case 0:
-        if(!this.permanent) this.destroy();
-        break;
-    }
-  }
-}
-
-class Timers extends UIObject {
-  constructor(font, style, offset) {
-    super(0, 0, 0, 0);
-    this.font = font;
-    this.style = style;
-    this.off = offset;
-    this.enabled = true;
-
-    this.fps = "";
-    this.fps_m = null;
-    this.ups = "";
-    this.ups_m = null;
-  }
-
-  logic(ctx, cw, ch) {
-    ctx.font = this.font;
-    this.fps = `MSPT:${Math.round(mspt, 2).toString().padStart(3)}`;
-    this.fps_m = ctx.measureText(this.fps);
-    this.ups = `MSPU:${Math.round(mspu, 2).toString().padStart(3)}`;
-    this.ups_m = ctx.measureText(this.ups);
-  }
-
-  render(ctx, cw, ch) {
-    let fps_h = text_height(this.fps_m) + this.off,
-        ups_h = text_height(this.ups_m) + this.off,
-        fps_x = cw - this.fps_m.width - this.off,
-        ups_x = cw - this.ups_m.width - this.off;
-
-    if(this.enabled) {
-      ctx.font = this.font;
-      ctx.fillStyle = this.style;
-
-      ctx.fillText(this.fps, fps_x, fps_h);
-      ctx.fillText(this.ups, ups_x, fps_h+ups_h);
-    }
-
-    this.w = Math.max(this.fps_m.width, this.ups_m.width) + 2*this.off;
-    this.h = fps_h + ups_h + this.off;
-    this.x = Math.min(fps_x, ups_x) - this.off;
-    this.y = 0;
-  }
-
-  click(opts) {
-    switch(opts.button) {
-      case 0:
-        this.enabled = !this.enabled;
-        break;
-
-      case 2:
-        render_bboxes = !render_bboxes;
-        break;
     }
   }
 }
 
 /* globals */
 let m_x = 0, m_y = 0;
-let render_bboxes = true;
+let render_bboxes = true, render_timers = true;
 let mspt = 0, mspu = 0;
 
 let libs = [];
 let c_x, c_y, r;
+
+/* UI elements */
+let timers_tb;
 
 /* utils */
 let text_height = (tm) => tm.actualBoundingBoxAscent; //+ tm.actualBoundingBoxDescent;
@@ -218,6 +159,9 @@ let Text = {
   },
   c(text, font, style, click) {
     return { type: "text", text: text, font: font, style: style, click: click, };
+  },
+  vt(get) {
+    return { type: "vartext", get: get, };
   },
   lf(margin=0) {
     return { type: "lf", margin: margin, };
@@ -283,7 +227,33 @@ let render_begin = (ctx, canvas) => {
   c_y = canvas.height / 2;
   r = canvas.height / 3;
 
-  new Timers("20px mono", "black", 5);
+  timers_tb = new TextBox(0, 0, [
+    Text.vt(() => {
+      return {
+        text: `MSPT:${Math.round(mspt, 2).toString().padStart(3)}`,
+        font: "20px mono", style: render_timers ? "black" : "transparent",
+      };
+    }),
+    Text.lf(5),
+    Text.vt(() => {
+      return {
+        text: `MSPU:${Math.round(mspu, 2).toString().padStart(3)}`,
+        font: "20px mono", style: render_timers ? "black" : "transparent",
+      };
+    }),
+  ], "transparent", 5);
+
+  timers_tb.click = (opts) => {
+    switch(opts.button) {
+      case 0:
+        render_timers = !render_timers;
+        break;
+
+      case 2:
+        render_bboxes = !render_bboxes;
+        break;
+    }
+  };
 
   let lib_n = 6;
   for(let i = 0; i < lib_n; i++) {
@@ -300,9 +270,14 @@ let render_begin = (ctx, canvas) => {
     Text.c("hejehe", "20px serif", "blue", (opts) => {
       console.log(opts);
     }),
-    Text.lf(),
-    Text.t("bruh", "50px mono", "black"),
-    Text.t("This is a text box.", "30px sans", "orange"),
+    Text.lf(10),
+    Text.vt(() => {
+      return {
+        text: `MSPT:${Math.round(mspt, 2).toString().padStart(3)}`,
+        font: "20px mono", style: "black",
+      };
+    }),
+    // Text.t("This is a text box.", "30px sans", "orange"),
   ], "transparent", 0);
 }
 
@@ -342,6 +317,8 @@ let logic_loop = (ctx, canvas) => {
     o.logic(ctx, canvas.width, canvas.height);
     o._subobjs.forEach(so => so.logic(ctx, canvas.width, canvas.height));
   });
+
+  timers_tb.x = canvas.width - timers_tb.w;
 }
 
 window.addEventListener("DOMContentLoaded", () => {
