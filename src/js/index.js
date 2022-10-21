@@ -2,11 +2,12 @@ let time_now = () => performance.now();
 
 let ui_objs = [], obj_next_id = 1;
 class UIObject {
-  constructor(x, y, w, h, global=true) {
+  constructor(x, y, w, h, angle=0, global=true) {
     this.x = x;
     this.y = y;
     this.w = w;
     this.h = h;
+    this.rot = angle;
 
     this._id = obj_next_id++;
     this._alive = true;
@@ -32,10 +33,12 @@ class UIObject {
   }
 
   is_inside(x, y) {
-    return x < (this.x+this.w)
-        && x > this.x
-        && y < (this.y+this.h)
-        && y > this.y;
+    let nx = this.x + (x-this.x)*Math.cos(this.rot) + (y-this.y)*Math.sin(this.rot),
+        ny = this.y + (y-this.y)*Math.cos(this.rot) - (x-this.x)*Math.sin(this.rot);
+    return nx < (this.x+this.w)
+        && nx > this.x
+        && ny < (this.y+this.h)
+        && ny > this.y;
   }
 
   logic(ctx, cw, ch) {}
@@ -85,7 +88,7 @@ class Library extends UIObject {
 
 class _TextObject extends UIObject {
   constructor(x, y, w, h, text, font, style) {
-    super(x, y, w, h, false);
+    super(x, y, w, h, 0, false);
 
     this.text = text;
     this.font = font;
@@ -207,7 +210,15 @@ let Text = {
 let render_bbox = (obj, ctx, style) => {
   ctx.strokeStyle = style;
   ctx.beginPath();
-  ctx.rect(obj.x, obj.y, obj.w, obj.h);
+  // ctx.rect(obj.x, obj.y, obj.w, obj.h);
+  ctx.moveTo(obj.x, obj.y);
+  ctx.lineTo(obj.x + obj.w * Math.cos(obj.rot),
+             obj.y + obj.w * Math.sin(obj.rot));
+  ctx.lineTo(obj.x + obj.w * Math.cos(obj.rot) - obj.h * Math.sin(obj.rot),
+             obj.y + obj.w * Math.sin(obj.rot) + obj.h * Math.cos(obj.rot));
+  ctx.lineTo(obj.x - obj.h * Math.sin(obj.rot),
+             obj.y + obj.h * Math.cos(obj.rot));
+  ctx.lineTo(obj.x, obj.y);
   ctx.stroke();
 };
 
