@@ -7,6 +7,7 @@ class UIObject {
     this.y = y;
     this.w = w;
     this.h = h;
+
     this._id = obj_next_id++;
     this._alive = true;
     this._subobjs = [];
@@ -20,6 +21,14 @@ class UIObject {
       const i = ui_objs.map(o => o._id).indexOf(this._id);
       if(i !== -1) ui_objs.splice(i, 1);
     }
+  }
+
+  is_alive() {
+    return this._alive;
+  }
+
+  id() {
+    return this._id;
   }
 
   is_inside(x, y) {
@@ -36,9 +45,18 @@ class UIObject {
 }
 
 class Library extends UIObject {
-  constructor(x, y, w, h, r) {
+  constructor(x, y, w, h, name, r) {
     super(x, y, w, h);
+    this.name = name;
     this.r = r;
+    this.tb = null;
+  }
+
+  logic(ctx, cw, ch) {
+    if(this.tb && this.tb.is_alive()) {
+      this.tb.x = this.x - (this.tb.w - this.w)/2;
+      this.tb.y = this.y - this.tb.h - 5;
+    }
   }
 
   render(ctx, cw, ch) {
@@ -46,6 +64,22 @@ class Library extends UIObject {
     ctx.beginPath();
     ctx.ellipse(this.x+this.w/2, this.y+this.h/2, this.r, this.r, 0, 0, 2*Math.PI);
     ctx.fill();
+  }
+
+  click(opts) {
+    if(this.tb && this.tb.is_alive()) {
+      this.tb.destroy();
+    } else {
+      this.tb = new TextBox(this.x, this.y, [
+        Text.t(this.name, "30px sans", "black"),
+      ], "black", 5);
+
+      this.tb.click = (opts) => {
+        if(opts.button == 0) {
+          this.tb.destroy();
+        }
+      }
+    }
   }
 }
 
@@ -111,6 +145,7 @@ class TextBox extends UIObject {
     this.h = this.lh.reduce((a, b) => a+b) + 2*this.margin;
 
     /* create all subobjects */
+    /* FIXME: respawning all objects increases id count fast */
     let cur_w = 0, cur_h = this.lh[0];
     line = 0;
     for(let i = 0; i < this.tos.length; i++) {
@@ -137,6 +172,10 @@ class TextBox extends UIObject {
       }
     }
   }
+
+  render(ctx, cw, ch) {
+    render_bbox(this, ctx, this.bstyle);
+  }
 }
 
 /* globals */
@@ -145,7 +184,6 @@ let render_bboxes = true, render_timers = true;
 let mspt = 0, mspu = 0;
 
 let libs = [];
-let c_x, c_y, r;
 
 /* UI elements */
 let timers_tb;
@@ -154,11 +192,9 @@ let timers_tb;
 let text_height = (tm) => tm.actualBoundingBoxAscent; //+ tm.actualBoundingBoxDescent;
 
 let Text = {
-  t(text, font, style) {
-    return { type: "text", text: text, font: font, style: style, };
-  },
-  c(text, font, style, click) {
-    return { type: "text", text: text, font: font, style: style, click: click, };
+  t(text, font, style, click=null, hover=null) {
+    return { type: "text", text: text, font: font,
+             style: style, click: click, hover: hover, };
   },
   vt(get) {
     return { type: "vartext", get: get, };
@@ -223,10 +259,6 @@ let canvas_arrow = (ctx, fromx, fromy, tox, toy, w) => {
 
 /* events */
 let render_begin = (ctx, canvas) => {
-  c_x = canvas.width / 2;
-  c_y = canvas.height / 2;
-  r = canvas.height / 3;
-
   timers_tb = new TextBox(0, 0, [
     Text.vt(() => {
       return {
@@ -255,30 +287,34 @@ let render_begin = (ctx, canvas) => {
     }
   };
 
+  let c_x = canvas.width / 2,
+      c_y = canvas.height / 2,
+      r = canvas.height / 3;
+
   let lib_n = 6;
   for(let i = 0; i < lib_n; i++) {
     let x = c_x - r*Math.cos(2*Math.PI*i/lib_n),
         y = c_y - r*Math.sin(2*Math.PI*i/lib_n),
         lib_r = 10;
-    libs.push(new Library(x-lib_r, y-lib_r, 2*lib_r, 2*lib_r, lib_r));
+    libs.push(new Library(x-lib_r, y-lib_r, 2*lib_r, 2*lib_r, `Lib_${i}`, lib_r));
   }
 
-  new TextBox(50, 50, [
-    Text.t("Hello world ", "30px sans", "green"),
-    Text.t("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "30px sans", "red"),
-    Text.lf(15),
-    Text.c("hejehe", "20px serif", "blue", (opts) => {
-      console.log(opts);
-    }),
-    Text.lf(10),
-    Text.vt(() => {
-      return {
-        text: `MSPT:${Math.round(mspt, 2).toString().padStart(3)}`,
-        font: "20px mono", style: "black",
-      };
-    }),
-    // Text.t("This is a text box.", "30px sans", "orange"),
-  ], "transparent", 0);
+  // new TextBox(50, 50, [
+  //   Text.t("Hello world ", "30px sans", "green"),
+  //   Text.t("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "30px sans", "red"),
+  //   Text.lf(15),
+  //   Text.t("hejehe", "20px serif", "blue", (opts) => {
+  //     console.log(opts);
+  //   }),
+  //   Text.lf(10),
+  //   Text.vt(() => {
+  //     return {
+  //       text: `MSPT:${Math.round(mspt, 2).toString().padStart(3)}`,
+  //       font: "20px mono", style: "black",
+  //     };
+  //   }),
+  //   Text.t("This is a text box.", "30px sans", "orange"),
+  // ], "transparent", 0);
 }
 
 let last_render = 0;
