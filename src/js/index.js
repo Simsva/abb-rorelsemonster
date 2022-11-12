@@ -61,7 +61,7 @@ class Library extends UIObject {
     /* text box */
     this.tb = new TextBox(this.x, this.y, [
       Text.t(this.name, "30px sans", "black"),
-    ], "black", 5, false);
+    ], "black", "white", 5, false);
     this.tb.click = (opts) => {
       if(opts.button == 0) this.tb._enabled = !this.tb._enabled;
     };
@@ -107,11 +107,12 @@ class _TextObject extends UIObject {
 }
 
 class TextBox extends UIObject {
-  constructor(x, y, text_objs, border_style, margin, global=true) {
+  constructor(x, y, text_objs, border_style, bg_style, margin, global=true) {
     super(x, y, 0, 0, 0, global);
 
     this.tos = text_objs;
     this.bstyle = border_style;
+    this.bgstyle = bg_style;
     this.margin = margin;
   }
 
@@ -180,6 +181,10 @@ class TextBox extends UIObject {
   }
 
   render(ctx, cw, ch) {
+    ctx.fillStyle = this.bgstyle;
+    ctx.beginPath();
+    ctx.rect(this.x, this.y, this.w, this.h);
+    ctx.fill();
     render_bbox(this, ctx, this.bstyle);
   }
 }
@@ -293,7 +298,7 @@ let render_begin = (ctx, canvas) => {
         font: "20px mono", style: render_timers ? "black" : "transparent",
       };
     }),
-  ], "transparent", 5);
+  ], "transparent", "white", 5);
 
   timers_tb.click = (opts) => {
     switch(opts.button) {
@@ -334,7 +339,7 @@ let render_begin = (ctx, canvas) => {
   //     };
   //   }),
   //   Text.t("This is a text box.", "30px sans", "orange"),
-  // ], "transparent", 0);
+  // ], "transparent", "transparent", 0);
 }
 
 let last_render = 0;
@@ -345,18 +350,18 @@ let render_loop = (ctx, canvas) => {
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  /* border */
-  ctx.strokeStyle = "black";
-  ctx.beginPath();
-  ctx.rect(0, 0, canvas.width, canvas.height);
-  ctx.stroke();
-
   /* render objects */
   for_all_objs(ui_objs, (o, depth, {ctx, cw, ch}) => {
     o.render(ctx, cw, ch);
     if(render_bboxes)
       render_bbox(o, ctx, bbox_colors[depth % bbox_colors.length]);
   }, {ctx: ctx, cw: canvas.width, ch: canvas.height});
+
+  /* border */
+  ctx.strokeStyle = "black";
+  ctx.beginPath();
+  ctx.rect(0, 0, canvas.width, canvas.height);
+  ctx.stroke();
 }
 
 let last_logic = 0;
