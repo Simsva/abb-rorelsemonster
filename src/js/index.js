@@ -89,6 +89,69 @@ class Library extends UIObject {
   }
 }
 
+class Arrow extends UIObject {
+  constructor(fromx, fromy, tox, toy, width, head_percent, line_width, style, text_objs, global=true) {
+    let dx = tox-fromx, dy = toy-fromy,
+        rot = -Math.atan2(dy, dx);
+    super(width/2*Math.sin(rot)+fromx,
+          width/2*Math.cos(rot)+fromy,
+          width, Math.sqrt(dx*dx + dy*dy),
+          rot, global);
+
+    console.log(rot, this.x, this.y, this.w, this.h);
+
+    this.fromx = fromx;
+    this.fromy = fromy;
+    this.tox = tox;
+    this.toy = toy;
+    this.headp = head_percent;
+    this.style = style;
+    this.linew = line_width;
+
+    this.tb = new TextBox(0,0, text_objs, style, "white", 3, false);
+    this.tb._enabled = false;
+    this._subobjs.push(this.tb);
+  }
+
+  logic(ctx, cw, ch) {
+    let dx = this.tox-this.fromx, dy = this.toy-this.fromy;
+
+    this.x = this.w/2*Math.sin(this.rot) + this.fromx;
+    this.y = this.w/2*Math.cos(this.rot) + this.fromy;
+    this.h = Math.sqrt(dx*dx + dy*dy);
+
+    this.headx = this.tox - dx*this.headp;
+    this.heady = this.toy - dy*this.headp;
+
+    this.tb.x = this.fromx + dx/2 - this.tb.w/2;
+    this.tb.y = this.fromy + dy/2 - this.tb.h/2;
+  }
+
+  render(ctx, cw, ch) {
+    ctx.strokeStyle = this.style;
+    ctx.lineWidth = this.linew;
+    ctx.beginPath();
+
+    ctx.moveTo(this.fromx, this.fromy);
+    ctx.lineTo(this.tox, this.toy);
+
+    /* NOTE: this is needed to avoid sharp corners,
+     *       no clue why */
+    ctx.moveTo(this.tox, this.toy);
+    ctx.lineTo(this.headx - this.w/2 * Math.sin(this.rot),
+               this.heady - this.w/2 * Math.cos(this.rot));
+
+    ctx.moveTo(this.tox, this.toy);
+    ctx.lineTo(this.headx + this.w/2 * Math.sin(this.rot),
+               this.heady + this.w/2 * Math.cos(this.rot));
+    ctx.stroke();
+  }
+
+  click(opts) {
+    this.tb._enabled = !this.tb._enabled;
+  }
+}
+
 class _TextObject extends UIObject {
   constructor(x, y, w, h, text, font, style) {
     super(x, y, w, h, 0, false);
@@ -218,6 +281,7 @@ let Text = {
 
 let render_bbox = (obj, ctx, style) => {
   ctx.strokeStyle = style;
+  ctx.lineWidth = 1;
   ctx.beginPath();
   // ctx.rect(obj.x, obj.y, obj.w, obj.h);
   ctx.moveTo(obj.x, obj.y);
@@ -324,6 +388,15 @@ let render_begin = (ctx, canvas) => {
     libs.push(new Library(x-lib_r, y-lib_r, 2*lib_r, 2*lib_r, `Lib_${i}`, lib_r));
   }
 
+  let test_arrow = new Arrow(10, 10, 500, 500, 50, 0.1, 5, "black", [
+    Text.vt(() => {
+      return {
+        text: `m_x: ${m_x}`,
+        style: "black", font: "20px sans",
+      };
+    }),
+  ]);
+
   // new TextBox(50, 50, [
   //   Text.t("Hello world ", "30px sans", "green"),
   //   Text.t("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "30px sans", "red"),
@@ -359,6 +432,7 @@ let render_loop = (ctx, canvas) => {
 
   /* border */
   ctx.strokeStyle = "black";
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.rect(0, 0, canvas.width, canvas.height);
   ctx.stroke();
