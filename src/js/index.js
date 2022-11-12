@@ -11,6 +11,7 @@ class UIObject {
 
     this._id = obj_next_id++;
     this._alive = true;
+    this._enabled = true;
     this._subobjs = [];
     this._global = global;
     if(this._global) ui_objs.push(this);
@@ -26,6 +27,10 @@ class UIObject {
 
   is_alive() {
     return this._alive;
+  }
+
+  is_enabled() {
+    return this._enabled;
   }
 
   id() {
@@ -52,7 +57,16 @@ class Library extends UIObject {
     super(x, y, w, h);
     this.name = name;
     this.r = r;
-    this.tb = null;
+
+    /* text box */
+    this.tb = new TextBox(this.x, this.y, [
+      Text.t(this.name, "30px sans", "black"),
+    ], "black", 5, false);
+    this.tb.click = (opts) => {
+      if(opts.button == 0) this.tb._enabled = !this.tb._enabled;
+    };
+    this.tb._enabled = false;
+    this._subobjs.push(this.tb);
   }
 
   logic(ctx, cw, ch) {
@@ -65,24 +79,13 @@ class Library extends UIObject {
   render(ctx, cw, ch) {
     ctx.fillStyle = "black";
     ctx.beginPath();
-    ctx.ellipse(this.x+this.w/2, this.y+this.h/2, this.r, this.r, 0, 0, 2*Math.PI);
+    ctx.ellipse(this.x+this.w/2, this.y+this.h/2,
+                this.r, this.r, 0, 0, 2*Math.PI);
     ctx.fill();
   }
 
   click(opts) {
-    if(this.tb && this.tb.is_alive()) {
-      this.tb.destroy();
-    } else {
-      this.tb = new TextBox(this.x, this.y, [
-        Text.t(this.name, "30px sans", "black"),
-      ], "black", 5);
-
-      this.tb.click = (opts) => {
-        if(opts.button == 0) {
-          this.tb.destroy();
-        }
-      }
-    }
+    if(opts.button == 0) this.tb._enabled = !this.tb._enabled;
   }
 }
 
@@ -104,8 +107,8 @@ class _TextObject extends UIObject {
 }
 
 class TextBox extends UIObject {
-  constructor(x, y, text_objs, border_style, margin) {
-    super(x, y, 0, 0);
+  constructor(x, y, text_objs, border_style, margin, global=true) {
+    super(x, y, 0, 0, 0, global);
 
     this.tos = text_objs;
     this.bstyle = border_style;
@@ -184,7 +187,8 @@ class TextBox extends UIObject {
 /* globals */
 let m_x = 0, m_y = 0;
 let render_bboxes = true, render_timers = true;
-let mspt = 0, mspu = 0;
+let bbox_colors = ["red", "green", "blue"];
+let mspf = 0, mspu = 0;
 
 let libs = [];
 
@@ -238,15 +242,20 @@ let mouse_down = (e) => {
     buttons: e.buttons,
   };
 
-  ui_objs.filter(o => o.is_inside(e.offsetX, e.offsetY)).forEach(o => {
-    o.click(opts);
-    o._subobjs
-     .filter(so => so.is_inside(e.offsetX, e.offsetY))
-     .forEach(so => so.click(opts));
-  });
+  for_all_objs(ui_objs, (o, depth, {x, y, opts}) => {
+    if(o.is_inside(x, y))
+      o.click(opts);
+  }, {x: e.offsetX, y: e.offsetY, opts: opts});
 }
 
 /* functions */
+let for_all_objs = (objs, callback, args, depth=0) => {
+  objs.filter(o => o.is_enabled()).forEach((o) => {
+    callback(o, depth, args);
+    for_all_objs(o._subobjs, callback, args, depth+1);
+  });
+}
+
 let canvas_arrow = (ctx, fromx, fromy, tox, toy, w) => {
   let headlen = 10; // length of head in pixels
   let dx = tox - fromx;
@@ -273,7 +282,7 @@ let render_begin = (ctx, canvas) => {
   timers_tb = new TextBox(0, 0, [
     Text.vt(() => {
       return {
-        text: `MSPT:${Math.round(mspt, 2).toString().padStart(3)}`,
+        text: `MSPF:${Math.round(mspf, 2).toString().padStart(3)}`,
         font: "20px mono", style: render_timers ? "black" : "transparent",
       };
     }),
@@ -320,7 +329,7 @@ let render_begin = (ctx, canvas) => {
   //   Text.lf(10),
   //   Text.vt(() => {
   //     return {
-  //       text: `MSPT:${Math.round(mspt, 2).toString().padStart(3)}`,
+  //       text: `MSPF:${Math.round(mspf, 2).toString().padStart(3)}`,
   //       font: "20px mono", style: "black",
   //     };
   //   }),
@@ -331,7 +340,7 @@ let render_begin = (ctx, canvas) => {
 let last_render = 0;
 let render_loop = (ctx, canvas) => {
   let now = time_now();
-  mspt = now - last_render;
+  mspf = now - last_render;
   last_render = now;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -343,15 +352,11 @@ let render_loop = (ctx, canvas) => {
   ctx.stroke();
 
   /* render objects */
-  /* TODO: render deeper subobjects */
-  ui_objs.forEach(o => {
-    o.render(ctx, canvas.width, canvas.height);
-    o._subobjs.forEach(so => so.render(ctx, canvas.width, canvas.height));
-    if(render_bboxes) {
-      render_bbox(o, ctx, "red");
-      o._subobjs.forEach(so => render_bbox(so, ctx, "green"));
-    }
-  });
+  for_all_objs(ui_objs, (o, depth, {ctx, cw, ch}) => {
+    o.render(ctx, cw, ch);
+    if(render_bboxes)
+      render_bbox(o, ctx, bbox_colors[depth % bbox_colors.length]);
+  }, {ctx: ctx, cw: canvas.width, ch: canvas.height});
 }
 
 let last_logic = 0;
@@ -360,11 +365,12 @@ let logic_loop = (ctx, canvas) => {
   mspu = now - last_logic;
   last_logic = now;
 
-  ui_objs.forEach(o => {
-    o.logic(ctx, canvas.width, canvas.height);
-    o._subobjs.forEach(so => so.logic(ctx, canvas.width, canvas.height));
-  });
+  /* handle object logic */
+  for_all_objs(ui_objs, (o, depth, {ctx, cw, ch}) => {
+    o.logic(ctx, cw, ch);
+  }, {ctx: ctx, cw: canvas.width, ch: canvas.height});
 
+  /* TODO: replace with hooks for objects */
   timers_tb.x = canvas.width - timers_tb.w;
 }
 
