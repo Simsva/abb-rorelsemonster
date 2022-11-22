@@ -91,15 +91,16 @@ class Library extends UIObject {
 
 class Arrow extends UIObject {
   constructor(fromx, fromy, tox, toy, width, head_percent, line_width, style, text_objs, global=true) {
+    /* NOTE: Y+ downwards and clockwise rotation was a mistake */
     let dx = tox-fromx, dy = toy-fromy,
-        rot = -Math.atan2(dy, dx);
-    super(width/2*Math.sin(rot)+fromx,
-          width/2*Math.cos(rot)+fromy,
+        rot = -Math.PI/2 + Math.atan2(dy, dx),
+        rrot = Math.atan2(dy, -dx);
+    super(-width/2*Math.sin(rrot)+fromx,
+          -width/2*Math.cos(rrot)+fromy,
           width, Math.sqrt(dx*dx + dy*dy),
           rot, global);
 
-    console.log(rot, this.x, this.y, this.w, this.h);
-
+    this.rrot = rrot;
     this.fromx = fromx;
     this.fromy = fromy;
     this.tox = tox;
@@ -116,8 +117,8 @@ class Arrow extends UIObject {
   logic(ctx, cw, ch) {
     let dx = this.tox-this.fromx, dy = this.toy-this.fromy;
 
-    this.x = this.w/2*Math.sin(this.rot) + this.fromx;
-    this.y = this.w/2*Math.cos(this.rot) + this.fromy;
+    this.x = -this.w/2*Math.sin(this.rrot) + this.fromx;
+    this.y = -this.w/2*Math.cos(this.rrot) + this.fromy;
     this.h = Math.sqrt(dx*dx + dy*dy);
 
     this.headx = this.tox - dx*this.headp;
@@ -138,12 +139,12 @@ class Arrow extends UIObject {
     /* NOTE: this is needed to avoid sharp corners,
      *       no clue why */
     ctx.moveTo(this.tox, this.toy);
-    ctx.lineTo(this.headx - this.w/2 * Math.sin(this.rot),
-               this.heady - this.w/2 * Math.cos(this.rot));
+    ctx.lineTo(this.headx - this.w/2 * Math.sin(this.rrot),
+               this.heady - this.w/2 * Math.cos(this.rrot));
 
     ctx.moveTo(this.tox, this.toy);
-    ctx.lineTo(this.headx + this.w/2 * Math.sin(this.rot),
-               this.heady + this.w/2 * Math.cos(this.rot));
+    ctx.lineTo(this.headx + this.w/2 * Math.sin(this.rrot),
+               this.heady + this.w/2 * Math.cos(this.rrot));
     ctx.stroke();
   }
 
@@ -299,7 +300,7 @@ let render_bbox = (obj, ctx, style) => {
 let mouse_move = (e) => {
   m_x = e.offsetX;
   m_y = e.offsetY;
-}
+};
 
 let mouse_down = (e) => {
   let opts = {
@@ -315,7 +316,7 @@ let mouse_down = (e) => {
     if(o.is_inside(x, y))
       o.click(opts);
   }, {x: e.offsetX, y: e.offsetY, opts: opts});
-}
+};
 
 /* functions */
 let for_all_objs = (objs, callback, args, depth=0) => {
@@ -323,28 +324,36 @@ let for_all_objs = (objs, callback, args, depth=0) => {
     callback(o, depth, args);
     for_all_objs(o._subobjs, callback, args, depth+1);
   });
-}
+};
 
-let canvas_arrow = (ctx, fromx, fromy, tox, toy, w) => {
-  let headlen = 10; // length of head in pixels
-  let dx = tox - fromx;
-  let dy = toy - fromy;
-  let angle = Math.atan2(dy, dx);
-  let old_width = ctx.lineWidth;
+let arrow_between = (lib1, lib2, lw, text_objs) => {
+  let fx = lib1.x + lib1.w/2,
+      fy = lib1.y + lib1.h/2,
+      tx = lib2.x + lib2.w/2,
+      ty = lib2.y + lib2.h/2,
+      rot = Math.atan2(ty-fy, tx-fx);
 
-  ctx.beginPath();
+  let r = 1.5*Math.max(lib1.r, lib2.r);
+  let fx2 = fx + r*Math.cos(rot),
+      fy2 = fy + r*Math.sin(rot),
+      tx2 = tx - r*Math.cos(rot),
+      ty2 = ty - r*Math.sin(rot);
 
-  ctx.lineWidth = w;
-  ctx.moveTo(fromx, fromy);
-  ctx.lineTo(tox, toy);
-  ctx.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
-  ctx.moveTo(tox, toy);
-  ctx.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
+  let dx = tx2 - fx2,
+      dy = ty2 - fy2,
+      l = Math.sqrt(dx*dx + dy*dy);
 
-  ctx.stroke();
+  let w = 0.06125*l, off = 0.6*w;
 
-  ctx.lineWidth = old_width;
-}
+  return new Arrow(
+    fx2 - off*Math.sin(rot),
+    fy2 + off*Math.cos(rot),
+    tx2 - off*Math.sin(rot),
+    ty2 + off*Math.cos(rot),
+    w, 0.1, lw,
+    "black", text_objs
+  );
+};
 
 /* events */
 let render_begin = (ctx, canvas) => {
@@ -378,17 +387,47 @@ let render_begin = (ctx, canvas) => {
 
   let c_x = canvas.width / 2,
       c_y = canvas.height / 2,
-      r = canvas.height / 3;
+      r = canvas.height / 2.3;
 
-  let lib_n = 6;
+  let lib_n = 33, lib_r = 10;
+  libs.push(new Library(c_x-lib_r, c_y-lib_r, 2*lib_r, 2*lib_r, "VASB", lib_r));
+
   for(let i = 0; i < lib_n; i++) {
     let x = c_x - r*Math.cos(2*Math.PI*i/lib_n),
-        y = c_y - r*Math.sin(2*Math.PI*i/lib_n),
-        lib_r = 10;
+        y = c_y - r*Math.sin(2*Math.PI*i/lib_n);
     libs.push(new Library(x-lib_r, y-lib_r, 2*lib_r, 2*lib_r, `Lib_${i}`, lib_r));
   }
+  lib_n++;
 
-  let test_arrow = new Arrow(10, 10, 500, 500, 50, 0.1, 5, "black", [
+  let l1 = 0, l2 = 1, l3 = 4;
+  let test_arrow = arrow_between(libs[l1], libs[l2], 1, [
+    Text.vt(() => {
+      return {
+        text: `m_x: ${m_x}`,
+        style: "black", font: "20px sans",
+      };
+    }),
+  ]);
+
+  let test_arrow2 = arrow_between(libs[l2], libs[l1], 1, [
+    Text.vt(() => {
+      return {
+        text: `m_x: ${m_x}`,
+        style: "black", font: "20px sans",
+      };
+    }),
+  ]);
+
+  let test_arrow3 = arrow_between(libs[l1], libs[l3], 1, [
+    Text.vt(() => {
+      return {
+        text: `m_x: ${m_x}`,
+        style: "black", font: "20px sans",
+      };
+    }),
+  ]);
+
+  let test_arrow4 = arrow_between(libs[l3], libs[l1], 1, [
     Text.vt(() => {
       return {
         text: `m_x: ${m_x}`,
