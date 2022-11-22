@@ -110,6 +110,10 @@ class Arrow extends UIObject {
     this.linew = line_width;
 
     this.tb = new TextBox(0,0, text_objs, style, "white", 3, false);
+    this.tb.click = (opts) => {
+      console.log("hejee");
+      this.tb._enabled = !this.tb._enabled;
+    };
     this.tb._enabled = false;
     this._subobjs.push(this.tb);
   }
@@ -154,9 +158,10 @@ class Arrow extends UIObject {
 }
 
 class _TextObject extends UIObject {
-  constructor(x, y, w, h, text, font, style) {
+  constructor(x, y, w, h, parent, text, font, style) {
     super(x, y, w, h, 0, false);
 
+    this.parent = parent;
     this.text = text;
     this.font = font;
     this.style = style;
@@ -167,6 +172,16 @@ class _TextObject extends UIObject {
     ctx.fillStyle = this.style;
 
     ctx.fillText(this.text, this.x, this.y+this.h);
+  }
+
+  click(opts) {
+    this.parent.click(opts);
+    if(this._click) this._click(opts);
+  }
+
+  hover() {
+    this.parent.hover();
+    if(this._hover) this._hover();
   }
 }
 
@@ -234,10 +249,11 @@ class TextBox extends UIObject {
             this.x+this.margin + cur_w,
             this.y+this.margin + cur_h-tm.h,
             tm.w, tm.h,
+            this,
             T.text, T.font, T.style,
           )) - 1;
-          if(T.click) this._subobjs[so_i].click = T.click;
-          if(T.hover) this._subobjs[so_i].hover = T.hover;
+          if(T.click) this._subobjs[so_i]._click = T.click;
+          if(T.hover) this._subobjs[so_i]._hover = T.hover;
           cur_w += tm.w;
           break;
       }
@@ -313,21 +329,34 @@ let mouse_down = (e) => {
     buttons: e.buttons,
   };
 
-  for_all_objs(ui_objs, (o, depth, {x, y, opts}) => {
+  let last_obj;
+  for_all_objs_l(ui_objs, (o, depth, {x, y}) => {
     if(o.is_inside(x, y))
-      o.click(opts);
-  }, {x: e.offsetX, y: e.offsetY, opts: opts});
+      last_obj = o;
+      // o.click(opts);
+  }, {x: e.offsetX, y: e.offsetY});
+
+  /* only click on the top visible object */
+  if(last_obj) last_obj.click(opts);
 };
 
 /* functions */
 let for_all_objs = (objs, callback, args, depth=0) => {
+  objs.filter(o => o.is_enabled()).forEach((o) => {
+    callback(o, depth, args);
+    for_all_objs(o._subobjs, callback, args, depth+1);
+  });
+};
+
+/* same as for_all_objs, but respects layers */
+let for_all_objs_l = (objs, callback, args, depth=0) => {
   let subobjs = [];
   /* TODO: sort by z-layer */
   objs.filter(o => o.is_enabled()).forEach((o) => {
     callback(o, depth, args);
     subobjs.push(...o._subobjs);
   });
-  /* always render subobjects one layer above other objects */
+  /* always handle subobjects "one layer above" other objects */
   if(subobjs.length > 0)
     for_all_objs(subobjs, callback, args, depth+1);
 };
@@ -532,7 +561,7 @@ let render_loop = (ctx, canvas) => {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   /* render objects */
-  for_all_objs(ui_objs, (o, depth, {ctx, cw, ch}) => {
+  for_all_objs_l(ui_objs, (o, depth, {ctx, cw, ch}) => {
     o.render(ctx, cw, ch);
     if(render_bboxes)
       render_bbox(o, ctx, bbox_colors[depth % bbox_colors.length]);
@@ -568,9 +597,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   const ctx = canvas.getContext("2d");
   cw = canvas.width;
   ch = canvas.height;
-
-  // console.log(await get_libraries());
-  // console.log(await get_transfers("VASB", "KOLBACK", "2020-01-01", "2021-01-01"));
 
   canvas.addEventListener("mousemove", mouse_move);
   canvas.addEventListener("mousedown", mouse_down);
