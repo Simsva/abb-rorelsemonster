@@ -53,8 +53,8 @@ class UIObject {
 }
 
 class Library extends UIObject {
-  constructor(x, y, w, h, name, r) {
-    super(x, y, w, h);
+  constructor(x, y, r, name) {
+    super(x-r, y-r, 2*r, 2*r);
     this.name = name;
     this.r = r;
 
@@ -255,6 +255,7 @@ class TextBox extends UIObject {
 
 /* globals */
 let m_x = 0, m_y = 0;
+let cw = 0, ch = 0;
 let render_bboxes = true, render_timers = true;
 let bbox_colors = ["red", "green", "blue"];
 let mspf = 0, mspu = 0;
@@ -320,10 +321,15 @@ let mouse_down = (e) => {
 
 /* functions */
 let for_all_objs = (objs, callback, args, depth=0) => {
+  let subobjs = [];
+  /* TODO: sort by z-layer */
   objs.filter(o => o.is_enabled()).forEach((o) => {
     callback(o, depth, args);
-    for_all_objs(o._subobjs, callback, args, depth+1);
+    subobjs.push(...o._subobjs);
   });
+  /* always render subobjects one layer above other objects */
+  if(subobjs.length > 0)
+    for_all_objs(subobjs, callback, args, depth+1);
 };
 
 let arrow_between = (lib1, lib2, lw, text_objs) => {
@@ -333,11 +339,11 @@ let arrow_between = (lib1, lib2, lw, text_objs) => {
       ty = lib2.y + lib2.h/2,
       rot = Math.atan2(ty-fy, tx-fx);
 
-  let r = 1.5*Math.max(lib1.r, lib2.r);
-  let fx2 = fx + r*Math.cos(rot),
-      fy2 = fy + r*Math.sin(rot),
-      tx2 = tx - r*Math.cos(rot),
-      ty2 = ty - r*Math.sin(rot);
+  let r1 = 1.5*lib1.r, r2 = 1.5*lib2.r;
+  let fx2 = fx + r1*Math.cos(rot),
+      fy2 = fy + r1*Math.sin(rot),
+      tx2 = tx - r2*Math.cos(rot),
+      ty2 = ty - r2*Math.sin(rot);
 
   let dx = tx2 - fx2,
       dy = ty2 - fy2,
@@ -353,6 +359,117 @@ let arrow_between = (lib1, lib2, lw, text_objs) => {
     w, 0.1, lw,
     "black", text_objs
   );
+};
+
+/* NOTE: should be replaced with an actual API call in production */
+let get_libraries = async () => {
+  let r = await fetch("https://simsva.se/koha_test/index.php", {
+    method: "POST",
+    headers: [["Content-Type", "application/json"]],
+    body: JSON.stringify({
+      /* NOTE: joining with branches for branchname takes forever */
+      query: `SELECT DISTINCT bt.tobranch AS b #, br.branchname AS n
+FROM branchtransfers AS bt
+#LEFT JOIN branches AS br
+#ON bt.tobranch = br.branchcode
+UNION
+SELECT DISTINCT bt.frombranch AS b #, br.branchname AS n
+FROM branchtransfers AS bt;
+#LEFT JOIN branches AS br
+#ON bt.frombranch = br.branchcode;`,
+    }),
+  });
+  return await r.json();
+};
+
+let get_transfers = async (from, to, after, before) => {
+  let r = await fetch("https://simsva.se/koha_test/index.php", {
+    method: "POST",
+    headers: [["Content-Type", "application/json"]],
+    body: JSON.stringify({
+      query: `SELECT COUNT(*) AS c
+FROM branchtransfers
+WHERE frombranch = '${from}'
+AND tobranch = '${to}'
+AND datesent
+  BETWEEN '${after}'
+      AND '${before}';`
+    }),
+  });
+  let j = await r.json();
+  return parseInt(j[0].c);
+};
+
+let lib_objs = {}, arrow_objs = {};
+let refresh_libs = async () => {
+  let libs_p = get_libraries();
+  let after  = document.getElementById("date_after").value,
+      before = document.getElementById("date_before").value;
+  if(after == "") after = "2020-01-01";
+  if(before == "") before = "2021-01-01";
+
+  for(const k in lib_objs) {
+    lib_objs[k].destroy();
+  }
+  for(const k in arrow_objs) {
+    arrow_objs[k].destroy();
+  }
+  lib_objs = {}; arrow_objs = {};
+
+  let cx = cw/2,   cy = ch/2,
+      r1 = ch/2.3, r2 = ch/2.3,
+      lib_r = 10, libs = await libs_p;
+
+  lib_objs["VASB"] = new Library(cx, cy, lib_r*5, "VASB");
+
+  let libs_out = [], arrows_out = {},
+      max_tr = 0;
+  /* calculate which libraries and arrows need to be rendered */
+  let trs = libs
+      .filter(o => o.b !== "VASB" && o.b != undefined)
+      /* all transfers are to/from VASB */
+      .map(o => {
+        return {
+          code: o.b,
+          from: get_transfers(o.b, "VASB", after, before),
+          to: get_transfers("VASB", o.b, after, before),
+        };
+      });
+  console.log(trs);
+  for(const o of libs) {
+    let lib = o.b;
+
+    let promises = trs.filter(o => o.code === lib);
+    if(promises.length === 0) continue;
+    let [to, from] = await Promise.all([
+      promises[0].to,
+      promises[0].from,
+    ]);
+
+    if(from > 0) arrows_out[`${lib}/VASB`] = from;
+    if(to > 0) arrows_out[`VASB/${lib}`] = to;
+    if(from > 0 || to > 0) libs_out.push(lib);
+    max_tr = Math.max(max_tr, to, from);
+  }
+
+  let lib_n = libs_out.length,
+      angle = 2*Math.PI/lib_n;
+  for(let i = 0; i < lib_n; i++) {
+    let lib = libs_out[i],
+        x = cx + r1*Math.cos(i*angle),
+        y = cy + r2*Math.sin(i*angle);
+    lib_objs[lib] = new Library(x, y, lib_r, lib);
+  }
+
+  const max_width = 5;
+  for(const key in arrows_out) {
+    let [l1, l2] = key.split("/"),
+        tr = arrows_out[key];
+    arrow_objs[key] = arrow_between(
+      lib_objs[l1], lib_objs[l2], Math.round(1 + (max_width-1) * tr/max_tr),
+      [Text.t(`${tr}`, "20px sans", "black")],
+    );
+  }
 };
 
 /* events */
@@ -385,56 +502,8 @@ let render_begin = (ctx, canvas) => {
     }
   };
 
-  let c_x = canvas.width / 2,
-      c_y = canvas.height / 2,
-      r = canvas.height / 2.3;
-
-  let lib_n = 33, lib_r = 10;
-  libs.push(new Library(c_x-lib_r, c_y-lib_r, 2*lib_r, 2*lib_r, "VASB", lib_r));
-
-  for(let i = 0; i < lib_n; i++) {
-    let x = c_x - r*Math.cos(2*Math.PI*i/lib_n),
-        y = c_y - r*Math.sin(2*Math.PI*i/lib_n);
-    libs.push(new Library(x-lib_r, y-lib_r, 2*lib_r, 2*lib_r, `Lib_${i}`, lib_r));
-  }
-  lib_n++;
-
-  let l1 = 0, l2 = 1, l3 = 4;
-  let test_arrow = arrow_between(libs[l1], libs[l2], 1, [
-    Text.vt(() => {
-      return {
-        text: `m_x: ${m_x}`,
-        style: "black", font: "20px sans",
-      };
-    }),
-  ]);
-
-  let test_arrow2 = arrow_between(libs[l2], libs[l1], 1, [
-    Text.vt(() => {
-      return {
-        text: `m_x: ${m_x}`,
-        style: "black", font: "20px sans",
-      };
-    }),
-  ]);
-
-  let test_arrow3 = arrow_between(libs[l1], libs[l3], 1, [
-    Text.vt(() => {
-      return {
-        text: `m_x: ${m_x}`,
-        style: "black", font: "20px sans",
-      };
-    }),
-  ]);
-
-  let test_arrow4 = arrow_between(libs[l3], libs[l1], 1, [
-    Text.vt(() => {
-      return {
-        text: `m_x: ${m_x}`,
-        style: "black", font: "20px sans",
-      };
-    }),
-  ]);
+  /* run once on start */
+  refresh_libs();
 
   // new TextBox(50, 50, [
   //   Text.t("Hello world ", "30px sans", "green"),
@@ -492,11 +561,16 @@ let logic_loop = (ctx, canvas) => {
   timers_tb.x = canvas.width - timers_tb.w;
 }
 
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   const canvas = document.getElementById("canvas");
   canvas.width = 1280;
   canvas.height = 720;
   const ctx = canvas.getContext("2d");
+  cw = canvas.width;
+  ch = canvas.height;
+
+  // console.log(await get_libraries());
+  // console.log(await get_transfers("VASB", "KOLBACK", "2020-01-01", "2021-01-01"));
 
   canvas.addEventListener("mousemove", mouse_move);
   canvas.addEventListener("mousedown", mouse_down);
