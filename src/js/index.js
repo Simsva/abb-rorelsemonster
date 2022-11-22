@@ -272,7 +272,7 @@ class TextBox extends UIObject {
 /* globals */
 let m_x = 0, m_y = 0;
 let cw = 0, ch = 0;
-let render_bboxes = true, render_timers = true;
+let render_bboxes = false, render_timers = true;
 let bbox_colors = ["red", "green", "blue"];
 let mspf = 0, mspu = 0;
 
