@@ -361,7 +361,7 @@ let for_all_objs_l = (objs, callback, args, depth=0) => {
     for_all_objs(subobjs, callback, args, depth+1);
 };
 
-let arrow_between = (lib1, lib2, lw, text_objs) => {
+let arrow_between = (lib1, lib2, lw, style, text_objs) => {
   let fx = lib1.x + lib1.w/2,
       fy = lib1.y + lib1.h/2,
       tx = lib2.x + lib2.w/2,
@@ -386,7 +386,7 @@ let arrow_between = (lib1, lib2, lw, text_objs) => {
     tx2 - off*Math.sin(rot),
     ty2 + off*Math.cos(rot),
     w, 0.1, lw,
-    "black", text_objs
+    style, text_objs
   );
 };
 
@@ -433,7 +433,8 @@ let lib_objs = {}, arrow_objs = {};
 let refresh_libs = async () => {
   let libs_p = get_libraries();
   let after  = document.getElementById("date_after").value,
-      before = document.getElementById("date_before").value;
+      before = document.getElementById("date_before").value,
+      middle_lib = document.getElementById("middle_lib").value;
   if(after == "") after = "2020-01-01";
   if(before == "") before = "2021-01-01";
 
@@ -449,19 +450,19 @@ let refresh_libs = async () => {
       r1 = ch/2.3, r2 = ch/2.3,
       lib_r = 10, libs = await libs_p;
 
-  lib_objs["VASB"] = new Library(cx, cy, lib_r*5, "VASB");
+  lib_objs[middle_lib] = new Library(cx, cy, lib_r*5, middle_lib);
 
   let libs_out = [], arrows_out = {},
       max_tr = 0;
   /* calculate which libraries and arrows need to be rendered */
   let trs = libs
-      .filter(o => o.b !== "VASB" && o.b != undefined)
+      .filter(o => o.b !== middle_lib && o.b != undefined)
       /* all transfers are to/from VASB */
       .map(o => {
         return {
           code: o.b,
-          from: get_transfers(o.b, "VASB", after, before),
-          to: get_transfers("VASB", o.b, after, before),
+          from: get_transfers(o.b, middle_lib, after, before),
+          to: get_transfers(middle_lib, o.b, after, before),
         };
       });
   console.log(trs);
@@ -475,8 +476,8 @@ let refresh_libs = async () => {
       promises[0].from,
     ]);
 
-    if(from > 0) arrows_out[`${lib}/VASB`] = from;
-    if(to > 0) arrows_out[`VASB/${lib}`] = to;
+    if(from > 0) arrows_out[`${lib}/${middle_lib}`] = from;
+    if(to > 0) arrows_out[`${middle_lib}/${lib}`] = to;
     if(from > 0 || to > 0) libs_out.push(lib);
     max_tr = Math.max(max_tr, to, from);
   }
@@ -490,13 +491,24 @@ let refresh_libs = async () => {
     lib_objs[lib] = new Library(x, y, lib_r, lib);
   }
 
+  const genre_list = [
+    "Skräck", "Deckare", "Science fiction"
+  ];
   const max_width = 5;
   for(const key in arrows_out) {
     let [l1, l2] = key.split("/"),
-        tr = arrows_out[key];
+        tr = arrows_out[key],
+        genre = genre_list[Math.round(Math.random()*(genre_list.length-1))],
+        color = 255-(Math.round(tr/max_tr * (255-100))+100);
     arrow_objs[key] = arrow_between(
-      lib_objs[l1], lib_objs[l2], Math.round(1 + (max_width-1) * tr/max_tr),
-      [Text.t(`${tr}`, "20px sans", "black")],
+      lib_objs[l1], lib_objs[l2],
+      Math.round(1 + (max_width-1) * tr/max_tr),
+      `rgb(${color},${color},${color})`,
+      [
+        Text.t(`Antal: ${tr}`, "20px sans", "black"),
+        Text.lf(5),
+        Text.t(`Genre: ${genre}`, "20px sans", "red"),
+      ],
     );
   }
 };
